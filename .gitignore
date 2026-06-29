@@ -1,0 +1,12 @@
+bin/
+.gocache/
+
+ollama-main/
+ollama-js-main/
+ollama-python-main/
+
+.env
+.env.*
+*.exe
+
+_tags.txt
