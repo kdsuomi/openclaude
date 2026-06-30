@@ -1,9 +1,13 @@
-
 # cc-simplerouter
 
-`simplerouter` launches [Claude Code](https://claude.com/claude-code) against any
-[OpenRouter](https://openrouter.ai) model — configured for that one process
-only, so your normal Claude Code setup is untouched.
+`simplerouter` instantly launches [Claude Code](https://claude.com/claude-code) against any
+[OpenRouter](https://openrouter.ai) model with a launch ui for selecting your model (and inference 
+provider, if desired). 
+
+The only configuration required is pasting your openrouter API key on first launch. Unlike other "claude code routers",
+simplerouter configures everything automatically on launch, so your normal Claude Code setup is
+untouched and you can stop messing with environment variables, local webservers, or manually 
+editing your .claude files.
 
 
 ```powershell
@@ -11,31 +15,44 @@ simplerouter                              # first run: pick a key + model
 simplerouter --model z-ai/glm-5.2 .       # launch with a specific model in the current dir
 ```
 
-On first run you paste an OpenRouter API key. It is validated against OpenRouter
-and saved (with your last model) in `~/.simplerouter/config.json`. Nothing is
-written to your global Claude Code config — `simplerouter` only sets environment
-variables for the child `claude` process.
 
 ## Install
 
-Requires [Go](https://go.dev/dl/) and an installed `claude` CLI.
+Requires an installed `claude` CLI.
 
-Don't have Go? Install it with winget (then open a new terminal so it's on `PATH`):
-
-```powershell
-winget install --id GoLang.Go
-```
+Windows:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
+irm https://raw.githubusercontent.com/kdsuomi/cc-simplerouter/main/scripts/install.ps1 | iex
 ```
 
-This builds `simplerouter.exe` and copies it to `~\.local\bin`. The script locates
-Go even if it isn't on the current shell's `PATH`.
+macOS/Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kdsuomi/cc-simplerouter/main/scripts/install.sh | sh
+```
+
+The install scripts download the latest GitHub Release binary and install it to
+`~/.local/bin`. macOS release binaries are Apple Silicon only.
+
+## Build from source
+
+Requires [Go](https://go.dev/dl/).
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_install.ps1
+```
+
+```sh
+sh ./scripts/build_install.sh
+```
+
+These scripts build from the cloned repo and install the result to `~/.local/bin`.
+
 
 ## The model picker
 
-Run `simplerouter` to open the interactive picker.
+Run `simplerouter` to open the interactive model picker.
 
 <img width="675" height="462" alt="image" src="https://github.com/user-attachments/assets/1f15087a-ef63-4cf4-b875-54b1bb2052ce" />
 
@@ -48,7 +65,7 @@ Run `simplerouter` to open the interactive picker.
 - **esc** — cancel
 
 The list is pre-filtered to models usable by Claude Code and ordered by
-OpenRouter popularity, with recommended models are pinned to the top.
+OpenRouter popularity, with recommended models pinned at the top.
 
 ## Provider / endpoint selection
 
@@ -101,6 +118,3 @@ chokes on Claude Code's thinking/beta request fields, retry with
 simplerouter --disable-thinking --model XXX.
 ```
 
-**Known issue:** OpenAI's GPT-5-family models (e.g. `openai/gpt-5-mini`) don't
-currently work through Claude Code here due to how they return encrypted
-reasoning blocks.

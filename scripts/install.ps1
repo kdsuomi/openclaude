@@ -1,50 +1,55 @@
+param(
+    [string]$Version = "latest",
+    [string]$Repo = "kdsuomi/cc-simplerouter",
+    [string]$InstallDir = (Join-Path $HOME ".local\bin")
+)
+
 $ErrorActionPreference = "Stop"
 
-$repo = Split-Path -Parent $PSScriptRoot
-$outDir = Join-Path $repo "bin"
-$exe = Join-Path $outDir "simplerouter.exe"
-
-# Locate the Go toolchain. A freshly-installed Go may be on the persistent
-# Machine PATH but missing from an already-open shell, so fall back to the
-# usual install locations rather than aborting with a confusing error.
-$go = (Get-Command go -ErrorAction SilentlyContinue).Source
-if (-not $go) {
-    foreach ($candidate in @(
-        "$env:ProgramFiles\Go\bin\go.exe",
-        "$env:LOCALAPPDATA\Programs\Go\bin\go.exe",
-        "$HOME\go\bin\go.exe",
-        "C:\Go\bin\go.exe"
-    )) {
-        if (Test-Path $candidate) { $go = $candidate; break }
+function Get-MachineArch {
+    switch ($env:PROCESSOR_ARCHITECTURE) {
+        "ARM64" { return "arm64" }
+        "AMD64" { return "amd64" }
+        default {
+            if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [System.Runtime.InteropServices.Architecture]::Arm64) {
+                return "arm64"
+            }
+            return "amd64"
+        }
     }
 }
-if (-not $go) {
-    throw "Could not find 'go'. Install Go (https://go.dev/dl/) or open a new terminal so PATH refreshes, then rerun this script."
+
+if (-not $IsWindows -and $PSVersionTable.PSEdition -eq "Core") {
+    throw "scripts/install.ps1 installs the Windows binary. Use scripts/install.sh on macOS or Linux."
 }
 
-New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-Push-Location $repo
-try {
-    & $go build -buildvcs=false -o $exe ./cmd/simplerouter
-    if ($LASTEXITCODE -ne 0) { throw "go build failed (exit $LASTEXITCODE)" }
-} finally {
-    Pop-Location
+$arch = Get-MachineArch
+$asset = "simplerouter_windows_$arch.exe"
+
+if ($Version -eq "latest") {
+    $url = "https://github.com/$Repo/releases/latest/download/$asset"
+} else {
+    $url = "https://github.com/$Repo/releases/download/$Version/$asset"
 }
 
-$installDir = Join-Path $HOME ".local\bin"
-New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-Copy-Item -Force $exe (Join-Path $installDir "simplerouter.exe")
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+$dest = Join-Path $InstallDir "simplerouter.exe"
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) "$asset.tmp"
 
-# ~/.local/bin is not on the default Windows PATH, so add it for the current
-# user (idempotently) so simplerouter is invocable from a new shell.
+Write-Host "Downloading $asset from $Repo ($Version)"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $tmp
+Move-Item -Force $tmp $dest
+
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if (-not $userPath) { $userPath = "" }
+
 $entries = $userPath.Split(";") | Where-Object { $_ -ne "" }
-if ($entries -notcontains $installDir) {
-    $newPath = if ($userPath) { "$userPath;$installDir" } else { $installDir }
+if ($entries -notcontains $InstallDir) {
+    $newPath = if ($userPath) { "$userPath;$InstallDir" } else { $InstallDir }
     [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-    Write-Host "Added $installDir to the user PATH."
-    Write-Host "Open a new terminal for the change to take effect."
+    Write-Host "Added $InstallDir to the user PATH."
+    Write-Host "Open a new terminal for the PATH change to take effect."
 }
 
-Write-Host "Installed simplerouter to $installDir"
+Write-Host "Installed simplerouter to $dest"
