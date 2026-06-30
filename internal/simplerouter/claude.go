@@ -49,6 +49,7 @@ func buildClaudeEnv(base []string, baseURL, key, model string, contextLength int
 		"CLAUDE_CODE_DISABLE_THINKING",
 		"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
 		"MAX_THINKING_TOKENS",
+		"ENABLE_CLAUDEAI_MCP_SERVERS",
 	)
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = defaultAnthropicBaseURL
@@ -66,6 +67,10 @@ func buildClaudeEnv(base []string, baseURL, key, model string, contextLength int
 		// pinned model it re-sends the whole conversation just to predict the
 		// next prompt, adding a full-context request per turn.
 		"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false",
+		// Claude Code cannot use claude.ai org connectors while API-key style
+		// OpenRouter auth is taking precedence. Disable that connector fetch
+		// for this child process so Claude does not show the connector warning.
+		"ENABLE_CLAUDEAI_MCP_SERVERS=false",
 	)
 	if contextLength > 0 {
 		env = append(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW="+strconv.Itoa(contextLength))

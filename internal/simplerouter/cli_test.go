@@ -298,6 +298,7 @@ func TestBuildClaudeEnvRemovesExistingValues(t *testing.T) {
 		"ANTHROPIC_API_KEY=old",
 		"ANTHROPIC_AUTH_TOKEN=old",
 		"CLAUDE_CODE_DISABLE_THINKING=old",
+		"ENABLE_CLAUDEAI_MCP_SERVERS=true",
 	}, "", "new-key", "z-ai/glm-5.2", 123, false)
 	m := envMap(env)
 	if m["PATH"] != "x" {
@@ -308,6 +309,9 @@ func TestBuildClaudeEnvRemovesExistingValues(t *testing.T) {
 	}
 	if m["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] != "false" {
 		t.Fatalf("prompt suggestion not disabled: %q", m["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"])
+	}
+	if m["ENABLE_CLAUDEAI_MCP_SERVERS"] != "false" {
+		t.Fatalf("claude.ai connectors not disabled: %q", m["ENABLE_CLAUDEAI_MCP_SERVERS"])
 	}
 	if m["ANTHROPIC_API_KEY"] != "" {
 		t.Fatalf("ANTHROPIC_API_KEY = %q, want empty", m["ANTHROPIC_API_KEY"])
