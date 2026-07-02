@@ -459,7 +459,7 @@ func TestPickerRecommendedColumnsAndEnterDefault(t *testing.T) {
 			OutputPrice:         "0.000003",
 			SupportedParameters: []string{"tools", "reasoning"},
 		},
-	}, "", nil)
+	}, "", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +492,7 @@ func TestPickerDetailsAndPagination(t *testing.T) {
 		stdin:  strings.NewReader("? 1\nn\n1\n"),
 		stderr: stderr,
 	}
-	res, err := a.pickModel("Select an OpenRouter model", models, "", nil)
+	res, err := a.pickModel("Select an OpenRouter model", models, "", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -744,6 +744,90 @@ func TestGeminiInvalidSavedKeyPromptsForReplacement(t *testing.T) {
 	}
 	if !strings.Contains(a.stderr.(*strings.Builder).String(), "no longer valid") {
 		t.Fatalf("missing stale-key warning: %q", a.stderr.(*strings.Builder).String())
+	}
+}
+
+func TestModelPickerBackReturnsToProviderPicker(t *testing.T) {
+	home := withTestHome(t)
+	binDir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "claude.exe"), []byte(""), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Both keys saved so no key prompts interrupt the picker flow.
+	if err := saveConfig(Config{OpenRouterAPIKey: "sk-or-test", GeminiAPIKey: "gm-test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	orSrv := openRouterTestServer(t, http.StatusOK, []Model{{ID: "z-ai/glm-5.2", Name: "GLM 5.2", ContextLength: 202752}})
+	defer orSrv.Close()
+	gmSrv := geminiTestServer(t, http.StatusOK)
+	defer gmSrv.Close()
+
+	var spec launchSpec
+	stderr := &strings.Builder{}
+	a := &app{
+		// Provider: 2 (Gemini) -> model picker: b (back) -> provider: 1
+		// (OpenRouter) -> model picker: Enter (first model).
+		stdin:         strings.NewReader("2\nb\n1\n\n"),
+		stdout:        &strings.Builder{},
+		stderr:        stderr,
+		httpClient:    orSrv.Client(),
+		apiBase:       orSrv.URL,
+		geminiAPIBase: gmSrv.URL,
+		runCommand: func(s launchSpec) error {
+			spec = s
+			return nil
+		},
+	}
+	if err := a.run(context.Background(), []string{"--select-model"}); err != nil {
+		t.Fatal(err)
+	}
+
+	out := stderr.String()
+	for _, want := range []string{"Select a Gemini model", "Select an OpenRouter model", "b back"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stderr missing %q: %q", want, out)
+		}
+	}
+	// The provider picker must have been shown twice (initial + after back).
+	if strings.Count(out, "Select a provider") < 2 {
+		t.Fatalf("provider picker not re-shown after back: %q", out)
+	}
+	if !slices.Equal(spec.Args, []string{"--model", "z-ai/glm-5.2"}) {
+		t.Fatalf("Args = %v", spec.Args)
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != providerOpenRouter || cfg.LastModel != "z-ai/glm-5.2" {
+		t.Fatalf("config = %+v", cfg)
+	}
+}
+
+func TestModelPickerBackDisabledWithoutProviderStep(t *testing.T) {
+	// Without a provider step to return to, "b" is a search filter, not a
+	// back command, and the footer shows no back hint.
+	stderr := &strings.Builder{}
+	a := &app{
+		stdin:  strings.NewReader("b\n1\n"),
+		stderr: stderr,
+	}
+	res, err := a.pickModel("Select an OpenRouter model", []Model{
+		{ID: "vendor/bravo", Name: "Bravo"},
+		{ID: "vendor/other", Name: "Other"},
+	}, "", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Model.ID != "vendor/bravo" {
+		t.Fatalf("selected = %s ('b' should filter to bravo)", res.Model.ID)
+	}
+	if strings.Contains(stderr.String(), "b back") {
+		t.Fatal("back hint shown when back is unavailable")
 	}
 }
 

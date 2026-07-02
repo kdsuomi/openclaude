@@ -96,21 +96,34 @@ func (a *app) run(ctx context.Context, args []string) error {
 		fmt.Fprintln(a.stderr, style.paint(clrDim, "Choose a provider, validate key, choose a model, then launch Claude Code."))
 	}
 
-	provider, err := a.determineProvider(cfg, modelFlag, providerFlag, selectModel, firstRun)
+	provider, viaPicker, err := a.determineProvider(cfg, modelFlag, providerFlag, selectModel, firstRun)
 	if err != nil {
 		return err
 	}
 
+	// When the provider came from the picker, the model picker offers a
+	// "back" action that returns here to re-choose the provider.
 	var key string
 	var res pickResult
-	switch provider {
-	case providerGemini:
-		key, res, err = a.selectGemini(ctx, cfg, modelFlag, selectModel, firstRun, style)
-	default:
-		key, res, err = a.selectOpenRouter(ctx, cfg, modelFlag, selectModel, firstRun, style)
-	}
-	if err != nil {
-		return err
+	for {
+		switch provider {
+		case providerGemini:
+			key, res, err = a.selectGemini(ctx, cfg, modelFlag, selectModel, firstRun, style, viaPicker)
+		default:
+			key, res, err = a.selectOpenRouter(ctx, cfg, modelFlag, selectModel, firstRun, style, viaPicker)
+		}
+		if viaPicker && errors.Is(err, errPickerBack) {
+			opt, perr := a.pickOne("Select a provider", providerOptions(), provider)
+			if perr != nil {
+				return perr
+			}
+			provider = opt.ID
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		break
 	}
 	selected := res.Model
 	modelID := selected.ID
@@ -175,27 +188,29 @@ func (a *app) run(ctx context.Context, args []string) error {
 // determineProvider resolves which backend to use, in precedence order:
 // explicit --provider flag, inference from --model, the provider picker (on
 // --select-model or first run), then the saved provider (default OpenRouter).
-func (a *app) determineProvider(cfg Config, modelFlag, providerFlag string, selectModel, firstRun bool) (string, error) {
+// viaPicker reports whether the interactive picker chose it, which enables
+// the model picker's "back" action.
+func (a *app) determineProvider(cfg Config, modelFlag, providerFlag string, selectModel, firstRun bool) (provider string, viaPicker bool, err error) {
 	if p := strings.ToLower(strings.TrimSpace(providerFlag)); p != "" {
 		if p != providerOpenRouter && p != providerGemini {
-			return "", fmt.Errorf("unknown provider %q (use %q or %q)", providerFlag, providerOpenRouter, providerGemini)
+			return "", false, fmt.Errorf("unknown provider %q (use %q or %q)", providerFlag, providerOpenRouter, providerGemini)
 		}
-		return p, nil
+		return p, false, nil
 	}
 	if p := inferProviderFromModel(modelFlag); p != "" {
-		return p, nil
+		return p, false, nil
 	}
 	if selectModel || firstRun {
 		opt, err := a.pickOne("Select a provider", providerOptions(), cfg.Provider)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
-		return opt.ID, nil
+		return opt.ID, true, nil
 	}
 	if cfg.Provider != "" {
-		return cfg.Provider, nil
+		return cfg.Provider, false, nil
 	}
-	return providerOpenRouter, nil
+	return providerOpenRouter, false, nil
 }
 
 // inferProviderFromModel guesses the backend from a --model value: OpenRouter
@@ -234,7 +249,7 @@ func launchProviderLabel(provider string, res pickResult) string {
 
 // selectOpenRouter acquires the OpenRouter key and resolves the model to
 // launch (picker or --model resolution).
-func (a *app) selectOpenRouter(ctx context.Context, cfg Config, modelFlag string, selectModel, firstRun bool, style terminalStyle) (string, pickResult, error) {
+func (a *app) selectOpenRouter(ctx context.Context, cfg Config, modelFlag string, selectModel, firstRun bool, style terminalStyle, allowBack bool) (string, pickResult, error) {
 	key, err := a.openRouterKey(ctx, cfg)
 	if err != nil {
 		return "", pickResult{}, err
@@ -254,7 +269,7 @@ func (a *app) selectOpenRouter(ctx context.Context, cfg Config, modelFlag string
 			current = modelID
 		}
 		endpointsFn := func(id string) ([]Endpoint, error) { return openRouterEndpoints(ctx, client, key, id) }
-		res, err := a.pickModel("Select an OpenRouter model", models, current, endpointsFn)
+		res, err := a.pickModel("Select an OpenRouter model", models, current, endpointsFn, allowBack)
 		return key, res, err
 	}
 	res, err := a.resolveOpenRouterModel(ctx, client, key, modelID)
@@ -262,7 +277,7 @@ func (a *app) selectOpenRouter(ctx context.Context, cfg Config, modelFlag string
 }
 
 // selectGemini mirrors selectOpenRouter for Google AI Studio.
-func (a *app) selectGemini(ctx context.Context, cfg Config, modelFlag string, selectModel, firstRun bool, style terminalStyle) (string, pickResult, error) {
+func (a *app) selectGemini(ctx context.Context, cfg Config, modelFlag string, selectModel, firstRun bool, style terminalStyle, allowBack bool) (string, pickResult, error) {
 	key, err := a.geminiKey(ctx, cfg)
 	if err != nil {
 		return "", pickResult{}, err
@@ -282,7 +297,7 @@ func (a *app) selectGemini(ctx context.Context, cfg Config, modelFlag string, se
 			current = modelID
 		}
 		// nil endpoints: the Tab providers view is OpenRouter-only.
-		res, err := a.pickModel("Select a Gemini model", models, current, nil)
+		res, err := a.pickModel("Select a Gemini model", models, current, nil, allowBack)
 		return key, res, err
 	}
 	res, err := a.resolveGeminiModel(ctx, client, key, modelID)
@@ -429,7 +444,7 @@ func (a *app) resolveOpenRouterModel(ctx context.Context, client *openRouterClie
 	}
 	if len(res.Ambiguous) > 0 {
 		endpointsFn := func(id string) ([]Endpoint, error) { return openRouterEndpoints(ctx, client, key, id) }
-		return a.pickModel("Select an OpenRouter model", res.Ambiguous, input, endpointsFn)
+		return a.pickModel("Select an OpenRouter model", res.Ambiguous, input, endpointsFn, false)
 	}
 	return pickResult{Model: res.Model}, nil
 }
@@ -450,7 +465,7 @@ func (a *app) resolveGeminiModel(ctx context.Context, client *geminiClient, key,
 		return pickResult{Model: Model{ID: input}}, nil
 	}
 	if len(res.Ambiguous) > 0 {
-		return a.pickModel("Select a Gemini model", res.Ambiguous, input, nil)
+		return a.pickModel("Select a Gemini model", res.Ambiguous, input, nil, false)
 	}
 	return pickResult{Model: res.Model}, nil
 }

@@ -120,6 +120,22 @@ func TestPickerStateStartsAtTopAndQuits(t *testing.T) {
 	}
 }
 
+func TestPickerStateEscGoesBackWhenAvailable(t *testing.T) {
+	st := newPickerState(interactiveTestModels(5))
+	st.canGoBack = true
+	if act := st.handleInput([]byte{0x1b}); act != pickerBack {
+		t.Fatalf("bare ESC with canGoBack = %v, want back", act)
+	}
+	// Ctrl+C always quits outright.
+	if act := st.handleInput([]byte{0x03}); act != pickerQuit {
+		t.Fatalf("Ctrl+C = %v, want quit", act)
+	}
+	// Arrow keys (ESC-prefixed CSI sequences) must not trigger back.
+	if act := st.handleInput([]byte("\x1b[B")); act != pickerNone {
+		t.Fatalf("down arrow = %v, want none", act)
+	}
+}
+
 func TestPickerStateTabOpensProviders(t *testing.T) {
 	st := newPickerState(interactiveTestModels(5))
 	// Tab (0x09) opens the provider view.
